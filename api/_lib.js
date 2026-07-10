@@ -60,42 +60,56 @@ function extractJson(text) {
   return null;
 }
 
+function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+
+function isRateLimit(status, text) {
+  return status === 429 || /\b1302\b|rate.?limit|速率限制|并发|请求频率|频繁/i.test(text || '');
+}
+
+async function postChat(cfg, body) {
+  return fetch(cfg.base + '/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg.key },
+    body: JSON.stringify(body)
+  });
+}
+
 async function callOpenAIChat(messages, { json = false } = {}) {
   const cfg = openaiConfig();
   if (!cfg.key) throw new Error('服务器未配置 OPENAI_API_KEY。请在部署平台的环境变量里设置。');
-  const body = {
-    model: cfg.model,
-    messages,
-    temperature: 0.2
-  };
+  const body = { model: cfg.model, messages, temperature: 0.2 };
   if (json) body.response_format = { type: 'json_object' };
-  let resp;
-  try {
-    resp = await fetch(cfg.base + '/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg.key },
-      body: JSON.stringify(body)
-    });
-  } catch (e) {
-    throw new Error('无法连接翻译服务：' + e.message);
-  }
-  if (!resp.ok) {
-    // Retry once without response_format for providers that reject it.
-    if (json) {
+
+  const MAX = 5;
+  let lastErr = '';
+  for (let attempt = 0; attempt < MAX; attempt++) {
+    let resp;
+    try {
+      resp = await postChat(cfg, body);
+    } catch (e) {
+      lastErr = '无法连接翻译服务：' + e.message;
+      await sleep(700 * (attempt + 1));
+      continue;
+    }
+    if (resp.ok) {
+      const data = await resp.json();
+      return data.choices?.[0]?.message?.content || '';
+    }
+    const t = await resp.text();
+    // Some providers reject response_format — drop it and retry right away.
+    if (json && body.response_format && /response_format|json/i.test(t)) {
       delete body.response_format;
-      resp = await fetch(cfg.base + '/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg.key },
-        body: JSON.stringify(body)
-      });
+      continue;
     }
-    if (!resp.ok) {
-      const t = await resp.text();
-      throw new Error('翻译服务返回错误 ' + resp.status + '：' + t.slice(0, 300));
+    // Rate limit / concurrency cap (HTTP 429 or Zhipu code 1302) — wait and retry.
+    if (isRateLimit(resp.status, t)) {
+      lastErr = '翻译服务限速（' + resp.status + '）：' + t.slice(0, 160);
+      await sleep(1300 * (attempt + 1));
+      continue;
     }
+    throw new Error('翻译服务返回错误 ' + resp.status + '：' + t.slice(0, 300));
   }
-  const data = await resp.json();
-  return data.choices?.[0]?.message?.content || '';
+  throw new Error(lastErr || '翻译服务繁忙，多次重试仍失败，请稍后再试。');
 }
 
 async function translateBatchOpenAI(texts, sourceLang, targetLang) {
@@ -121,7 +135,6 @@ async function translateBatchOpenAI(texts, sourceLang, targetLang) {
   const parsed = extractJson(content);
   let out = parsed && Array.isArray(parsed.dst) ? parsed.dst : null;
   if (!out || out.length !== texts.length) {
-    // Alignment failed — translate each item individually as a fallback.
     out = [];
     for (const t of texts) {
       if (!t || !t.trim()) { out.push(t); continue; }
@@ -180,7 +193,6 @@ async function translate(texts, sourceLang, targetLang) {
     }
     cur.push(t);
     curLen += len;
-    // A single very long segment goes out on its own.
     if (len > CHUNK_CHARS) {
       chunks.push(cur);
       cur = [];
@@ -193,6 +205,7 @@ async function translate(texts, sourceLang, targetLang) {
   for (const c of chunks) {
     const r = await doBatch(c, sourceLang, targetLang);
     results.push(...r);
+    await sleep(300);
   }
   return results;
 }
