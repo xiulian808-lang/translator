@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>全能翻译 · Universal Translator</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌐</text></svg>" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+  :root{
+    --bg:#f6f8fc; --panel:#ffffff; --ink:#1f2733; --muted:#7a8699;
+    --line:#e6ebf2; --brand:#2f6df6; --brand-soft:#eaf1ff; --ok:#12a150; --shadow:0 1px 3px rgba(16,32,64,.06),0 8px 24px rgba(16,32,64,.06);
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#0f141b; --panel:#171e28; --ink:#e8edf4; --muted:#8a97a8; --line:#26303d; --brand:#5b8cff; --brand-soft:#1b2740; --shadow:0 1px 3px rgba(0,0,0,.4); }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--ink);}
+  header{display:flex;align-items:center;gap:12px;padding:14px 22px;background:var(--panel);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20;}
+  .logo{font-size:22px;font-weight:700;display:flex;align-items:center;gap:9px;}
+  .logo .dot{width:11px;height:11px;border-radius:50%;background:var(--brand);}
+  .engine{margin-left:auto;font-size:12.5px;color:var(--muted);display:flex;align-items:center;gap:6px;}
+  .engine b{color:var(--ink);font-weight:600}
+  .wrap{max-width:1180px;margin:0 auto;padding:18px;}
+  .tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;}
+  .tab{padding:9px 16px;border-radius:999px;border:1px solid var(--line);background:var(--panel);color:var(--muted);cursor:pointer;font-size:14px;font-weight:600;transition:.15s;}
+  .tab:hover{color:var(--ink)}
+  .tab.active{background:var(--brand);color:#fff;border-color:var(--brand);}
+  .langbar{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap;}
+  select{appearance:none;background:var(--panel);border:1px solid var(--line);color:var(--ink);padding:9px 32px 9px 12px;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%237a8699' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;}
+  .swap{width:38px;height:38px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--brand);cursor:pointer;font-size:17px;display:flex;align-items:center;justify-content:center;transition:.15s;}
+  .swap:hover{background:var(--brand-soft)}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+  @media(max-width:760px){.grid{grid-template-columns:1fr}}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);display:flex;flex-direction:column;min-height:300px;overflow:hidden;}
+  .panel .phead{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);font-weight:600;}
+  .panel .pbody{flex:1;display:flex;}
+  textarea{width:100%;border:none;outline:none;resize:none;background:transparent;color:var(--ink);font-size:17px;line-height:1.6;padding:16px;font-family:inherit;}
+  .out{width:100%;padding:16px;font-size:17px;line-height:1.6;white-space:pre-wrap;overflow:auto;color:var(--ink);}
+  .out.placeholder{color:var(--muted)}
+  .tools{display:flex;gap:6px}
+  .iconbtn{border:none;background:transparent;color:var(--muted);cursor:pointer;padding:6px;border-radius:8px;font-size:15px;display:flex;align-items:center;gap:5px;transition:.15s;}
+  .iconbtn:hover{background:var(--brand-soft);color:var(--brand)}
+  .actionbar{display:flex;gap:10px;margin-top:14px;align-items:center;flex-wrap:wrap;}
+  .btn{padding:10px 20px;border-radius:11px;border:none;background:var(--brand);color:#fff;font-size:15px;font-weight:600;cursor:pointer;transition:.15s;}
+  .btn:hover{filter:brightness(1.05)}
+  .btn.ghost{background:var(--panel);color:var(--ink);border:1px solid var(--line);}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .hint{font-size:12.5px;color:var(--muted);}
+  .drop{border:2px dashed var(--line);border-radius:16px;background:var(--panel);padding:40px 20px;text-align:center;cursor:pointer;transition:.15s;color:var(--muted);}
+  .drop:hover,.drop.over{border-color:var(--brand);background:var(--brand-soft);color:var(--brand)}
+  .drop .big{font-size:40px;margin-bottom:8px}
+  .drop b{color:var(--ink)}
+  .filerow{display:flex;align-items:center;gap:10px;margin-bottom:12px;font-size:14px;flex-wrap:wrap}
+  .chip{background:var(--brand-soft);color:var(--brand);padding:5px 12px;border-radius:999px;font-weight:600;font-size:13px}
+  table.tt{border-collapse:collapse;width:100%;font-size:13.5px;background:var(--panel)}
+  table.tt td{border:1px solid var(--line);padding:7px 10px;vertical-align:top;max-width:340px;}
+  table.tt tr:nth-child(even){background:rgba(127,127,127,.04)}
+  .imgwrap img{max-width:100%;border-radius:12px;border:1px solid var(--line)}
+  .spinner{display:inline-block;width:15px;height:15px;border:2px solid var(--brand);border-top-color:transparent;border-radius:50%;animation:spin .7s linear infinite;vertical-align:-2px}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1f2733;color:#fff;padding:11px 20px;border-radius:12px;font-size:14px;opacity:0;transition:.25s;pointer-events:none;z-index:50;box-shadow:var(--shadow)}
+  .toast.show{opacity:1}
+  .err{color:#e5484d;font-size:13.5px;margin-top:8px}
+  .speaking{color:var(--brand)!important;background:var(--brand-soft)!important}
+  .hide{display:none!important}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo"><span class="dot"></span>全能翻译</div>
+  <div class="engine">翻译引擎：<b id="engineName">连接中…</b></div>
+</header>
+
+<div class="wrap">
+  <div class="tabs">
+    <button class="tab active" data-mode="text">📝 文本</button>
+    <button class="tab" data-mode="doc">📄 文档</button>
+    <button class="tab" data-mode="table">📊 表格</button>
+    <button class="tab" data-mode="image">🖼️ 图片</button>
+  </div>
+
+  <div class="langbar">
+    <select id="src"></select>
+    <button class="swap" id="swapBtn" title="互换语言">⇄</button>
+    <select id="tgt"></select>
+    <span class="hint" id="modeHint"></span>
+  </div>
+
+  <!-- ================= 文本模式 ================= -->
+  <section id="mode-text">
+    <div class="grid">
+      <div class="panel">
+        <div class="phead">
+          <span id="srcLabel">原文</span>
+          <div class="tools">
+            <button class="iconbtn" data-speak="in">🔊 朗读</button>
+            <button class="iconbtn" id="clearIn">✕ 清空</button>
+          </div>
+        </div>
+        <div class="pbody"><textarea id="inText" placeholder="输入或粘贴任意文字，自动翻译…"></textarea></div>
+      </div>
+      <div class="panel">
+        <div class="phead">
+          <span id="tgtLabel">译文</span>
+          <div class="tools">
+            <button class="iconbtn" data-speak="out">🔊 朗读</button>
+            <button class="iconbtn" id="copyOut">📋 复制</button>
+          </div>
+        </div>
+        <div class="pbody"><div class="out placeholder" id="outText">翻译结果会显示在这里</div></div>
+      </div>
+    </div>
+    <div class="actionbar">
+      <button class="btn" id="translateBtn">翻译</button>
+      <span class="hint">输入后会自动翻译；也可以点按钮。</span>
+    </div>
+    <div class="err hide" id="textErr"></div>
+  </section>
+
+  <!-- ================= 文档模式 ================= -->
+  <section id="mode-doc" class="hide">
+    <div class="drop" id="docDrop">
+      <div class="big">📄</div>
+      <div><b>点击或拖入文档</b>（Word .docx / PDF / TXT）</div>
+      <div class="hint" style="margin-top:6px">自动提取文字并翻译，可导出原文-译文对照</div>
+      <input type="file" id="docInput" accept=".docx,.pdf,.txt" class="hide" />
+    </div>
+    <div id="docResult" class="hide">
+      <div class="filerow">
+        <span class="chip" id="docName"></span>
+        <button class="btn ghost" id="docReset">换一个文件</button>
+        <button class="btn ghost" id="docSpeak">🔊 朗读译文</button>
+        <button class="btn ghost" id="docExportTxt">导出 .txt</button>
+        <button class="btn" id="docExportDoc">导出 Word</button>
+      </div>
+      <div class="grid" id="docGrid"></div>
+    </div>
+    <div class="err hide" id="docErr"></div>
+  </section>
+
+  <!-- ================= 表格模式 ================= -->
+  <section id="mode-table" class="hide">
+    <div class="drop" id="tableDrop">
+      <div class="big">📊</div>
+      <div><b>点击或拖入表格</b>（Excel .xlsx / .xls / CSV）</div>
+      <div class="hint" style="margin-top:6px">逐格翻译并保留表格结构，可导出翻译后的 Excel</div>
+      <input type="file" id="tableInput" accept=".xlsx,.xls,.csv" class="hide" />
+    </div>
+    <div id="tableResult" class="hide">
+      <div class="filerow">
+        <span class="chip" id="tableName"></span>
+        <button class="btn ghost" id="tableReset">换一个文件</button>
+        <button class="btn" id="tableExport">导出翻译后的 Excel</button>
+        <span class="hint" id="tableStat"></span>
+      </div>
+      <div style="overflow:auto;border-radius:12px;border:1px solid var(--line)"><div id="tablePreview"></div></div>
+    </div>
+    <div class="err hide" id="tableErr"></div>
+  </section>
+
+  <!-- ================= 图片模式 ================= -->
+  <section id="mode-image" class="hide">
+    <div class="drop" id="imgDrop">
+      <div class="big">🖼️</div>
+      <div><b>点击或拖入图片</b>（截图 / 照片 / PNG / JPG）</div>
+      <div class="hint" style="margin-top:6px">识别图片里的文字并翻译（需要视觉模型引擎）</div>
+      <input type="file" id="imgInput" accept="image/*" class="hide" />
+    </div>
+    <div id="imgResult" class="hide">
+      <div class="filerow">
+        <button class="btn ghost" id="imgReset">换一张图片</button>
+      </div>
+      <div class="grid">
+        <div class="panel">
+          <div class="phead"><span>图片 & 识别原文</span>
+            <div class="tools"><button class="iconbtn" id="imgSpeakIn">🔊 朗读</button></div>
+          </div>
+          <div class="pbody" style="flex-direction:column">
+            <div class="imgwrap" style="padding:12px"><img id="imgPreview" alt=""/></div>
+            <div class="out" id="imgOriginal"></div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="phead"><span>译文</span>
+            <div class="tools">
+              <button class="iconbtn" id="imgSpeakOut">🔊 朗读</button>
+              <button class="iconbtn" id="imgCopy">📋 复制</button>
+            </div>
+          </div>
+          <div class="pbody"><div class="out" id="imgTranslation"></div></div>
+        </div>
+      </div>
+    </div>
+    <div class="err hide" id="imgErr"></div>
+  </section>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+const LANGS = [
+  ['auto','自动检测'],['zh','中文（简体）'],['zh-TW','中文（繁体）'],['en','英语'],['ja','日语'],
+  ['ko','韩语'],['es','西班牙语'],['fr','法语'],['de','德语'],['ru','俄语'],['pt','葡萄牙语'],
+  ['it','意大利语'],['ar','阿拉伯语'],['th','泰语'],['vi','越南语'],['id','印尼语'],
+  ['hi','印地语'],['tr','土耳其语'],['nl','荷兰语'],['pl','波兰语']
+];
+const BCP47 = {zh:'zh-CN','zh-TW':'zh-TW',en:'en-US',ja:'ja-JP',ko:'ko-KR',es:'es-ES',fr:'fr-FR',
+  de:'de-DE',ru:'ru-RU',pt:'pt-PT',it:'it-IT',ar:'ar-SA',th:'th-TH',vi:'vi-VN',id:'id-ID',
+  hi:'hi-IN',tr:'tr-TR',nl:'nl-NL',pl:'pl-PL'};
+
+const $ = (id) => document.getElementById(id);
+function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),1800); }
+function fillLangs(sel, includeAuto){
+  sel.innerHTML='';
+  LANGS.forEach(([code,name])=>{ if(code==='auto'&&!includeAuto) return; const o=document.createElement('option'); o.value=code; o.textContent=name; sel.appendChild(o); });
+}
+fillLangs($('src'), true); fillLangs($('tgt'), false);
+$('src').value='auto'; $('tgt').value='en';
+
+// remember last choice in-memory (per session)
+const state = { mode:'text' };
+
+// ---------- engine status ----------
+fetch('/api/translate').then(r=>r.json()).then(d=>{
+  const map={openai:'GPT / 大模型（支持图片识别）',deepl:'DeepL（文本）'};
+  $('engineName').textContent = map[d.provider] || d.provider || '已就绪';
+}).catch(()=>{ $('engineName').textContent='未连接（请检查部署）'; });
+
+// ---------- API ----------
+async function apiTranslate(texts, sourceLang, targetLang){
+  const r = await fetch('/api/translate',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({texts, sourceLang, targetLang})});
+  const d = await r.json();
+  if(!r.ok) throw new Error(d.error||('请求失败 '+r.status));
+  return d.translations;
+}
+async function apiOcr(imageDataUrl, sourceLang, targetLang){
+  const r = await fetch('/api/ocr',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({image:imageDataUrl, sourceLang, targetLang})});
+  const d = await r.json();
+  if(!r.ok) throw new Error(d.error||('请求失败 '+r.status));
+  return d;
+}
+
+// ---------- TTS ----------
+let voices=[];
+function loadVoices(){ voices = window.speechSynthesis ? speechSynthesis.getVoices() : []; }
+if(window.speechSynthesis){ loadVoices(); speechSynthesis.onvoiceschanged=loadVoices; }
+function speak(text, langCode, btn){
+  if(!window.speechSynthesis){ toast('当前浏览器不支持朗读'); return; }
+  if(!text || !text.trim()){ toast('没有可朗读的内容'); return; }
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  const bcp = BCP47[langCode];
+  if(bcp){
+    u.lang = bcp;
+    const v = voices.find(v=>v.lang===bcp) || voices.find(v=>v.lang && v.lang.startsWith(langCode));
+    if(v) u.voice=v;
+  }
+  if(btn){ btn.classList.add('speaking'); u.onend=()=>btn.classList.remove('speaking'); u.onerror=()=>btn.classList.remove('speaking'); }
+  speechSynthesis.speak(u);
+}
+
+// ================= TABS =================
+document.querySelectorAll('.tab').forEach(tab=>{
+  tab.addEventListener('click',()=>{
+    document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+    tab.classList.add('active');
+    state.mode = tab.dataset.mode;
+    ['text','doc','table','image'].forEach(m=>$('mode-'+m).classList.toggle('hide', m!==state.mode));
+    const hints={text:'适合复制粘贴文案、句子、段落',doc:'上传 Word / PDF / TXT',table:'上传 Excel / CSV',image:'上传截图或图片'};
+    $('modeHint').textContent = hints[state.mode]||'';
+  });
+});
+$('modeHint').textContent='适合复制粘贴文案、句子、段落';
+
+// language labels + swap
+function refreshLabels(){
+  const s=$('src').selectedOptions[0].text, t=$('tgt').selectedOptions[0].text;
+  $('srcLabel').textContent='原文 · '+s; $('tgtLabel').textContent='译文 · '+t;
+}
+refreshLabels();
+$('src').addEventListener('change',()=>{refreshLabels(); autoTranslate();});
+$('tgt').addEventListener('change',()=>{refreshLabels(); autoTranslate(); if(lastDocParagraphs) retranslateDoc(); });
+$('swapBtn').addEventListener('click',()=>{
+  if($('src').value==='auto'){ toast('“自动检测”不能作为目标语言'); }
+  const s=$('src').value, t=$('tgt').value;
+  if(s!=='auto'){ $('tgt').value=s; }
+  $('src').value=t;
+  // move current translation to input
+  const outT = $('outText').textContent;
+  if(outT && !$('outText').classList.contains('placeholder')){ $('inText').value=outT; }
+  refreshLabels(); autoTranslate();
+});
+
+// ================= TEXT MODE =================
+let tTimer=null, lastReq=0;
+function autoTranslate(){ clearTimeout(tTimer); tTimer=setTimeout(runTextTranslate, 650); }
+$('inText').addEventListener('input', autoTranslate);
+$('translateBtn').addEventListener('click', runTextTranslate);
+$('clearIn').addEventListener('click',()=>{ $('inText').value=''; setOut('', true); });
+$('copyOut').addEventListener('click',()=>{ const t=$('outText').textContent; if(t&&!$('outText').classList.contains('placeholder')){navigator.clipboard.writeText(t); toast('已复制译文');}});
+document.querySelectorAll('[data-speak]').forEach(b=>b.addEventListener('click',()=>{
+  if(b.dataset.speak==='in') speak($('inText').value, $('src').value==='auto'?$('tgt').value:$('src').value, b);
+  else speak($('outText').textContent, $('tgt').value, b);
+}));
+function setOut(text, placeholder){ const o=$('outText'); o.textContent = placeholder ? '翻译结果会显示在这里' : text; o.classList.toggle('placeholder', !!placeholder); }
+async function runTextTranslate(){
+  const text=$('inText').value.trim();
+  $('textErr').classList.add('hide');
+  if(!text){ setOut('', true); return; }
+  const reqId=++lastReq;
+  $('outText').innerHTML='<span class="spinner"></span>'; $('outText').classList.remove('placeholder');
+  try{
+    const paras = text.split(/\n{2,}/);
+    const res = await apiTranslate(paras, $('src').value, $('tgt').value);
+    if(reqId!==lastReq) return;
+    setOut(res.join('\n\n'), false);
+  }catch(e){
+    if(reqId!==lastReq) return;
+    setOut('', true);
+    $('textErr').textContent='翻译失败：'+e.message; $('textErr').classList.remove('hide');
+  }
+}
+
+// ================= shared file drop helper =================
+function wireDrop(dropEl, inputEl, onFile){
+  dropEl.addEventListener('click',()=>inputEl.click());
+  inputEl.addEventListener('change',e=>{ if(e.target.files[0]) onFile(e.target.files[0]); });
+  ['dragover'].forEach(ev=>dropEl.addEventListener(ev,e=>{e.preventDefault();dropEl.classList.add('over');}));
+  ['dragleave','drop'].forEach(ev=>dropEl.addEventListener(ev,e=>{e.preventDefault();dropEl.classList.remove('over');}));
+  dropEl.addEventListener('drop',e=>{ if(e.dataTransfer.files[0]) onFile(e.dataTransfer.files[0]); });
+}
+
+// ================= DOC MODE =================
+let lastDocParagraphs=null, lastDocTrans=null, lastDocName='';
+wireDrop($('docDrop'), $('docInput'), handleDoc);
+$('docReset').addEventListener('click',()=>{ $('docResult').classList.add('hide'); $('docDrop').classList.remove('hide'); $('docInput').value=''; });
+$('docSpeak').addEventListener('click',e=>{ if(lastDocTrans) speak(lastDocTrans.join('\n'), $('tgt').value, e.target); });
+$('docExportTxt').addEventListener('click',exportDocTxt);
+$('docExportDoc').addEventListener('click',exportDocWord);
+
+async function handleDoc(file){
+  $('docErr').classList.add('hide');
+  lastDocName=file.name;
+  try{
+    let paras=[];
+    const ext=file.name.split('.').pop().toLowerCase();
+    if(ext==='txt'){ const txt=await file.text(); paras=txt.split(/\n/).map(s=>s).filter((s,i,a)=>true); }
+    else if(ext==='docx'){ const buf=await file.arrayBuffer(); const r=await mammoth.extractRawText({arrayBuffer:buf}); paras=r.value.split(/\n/); }
+    else if(ext==='pdf'){ paras=await extractPdf(file); }
+    else { throw new Error('暂不支持这种文档格式'); }
+    paras = paras.map(s=>s.replace(/\s+$/,'')).filter(s=>s.trim().length>0);
+    if(!paras.length) throw new Error('没有从文档中提取到文字');
+    lastDocParagraphs=paras;
+    $('docDrop').classList.add('hide'); $('docResult').classList.remove('hide');
+    $('docName').textContent='📄 '+file.name+' · '+paras.length+' 段';
+    await retranslateDoc();
+  }catch(e){ $('docErr').textContent='处理失败：'+e.message; $('docErr').classList.remove('hide'); }
+}
+async function extractPdf(file){
+  const buf=await file.arrayBuffer();
+  const pdf=await pdfjsLib.getDocument({data:buf}).promise;
+  const out=[];
+  for(let i=1;i<=pdf.numPages;i++){
+    const page=await pdf.getPage(i);
+    const tc=await page.getTextContent();
+    let line=''; let lastY=null;
+    tc.items.forEach(it=>{
+      if(lastY!==null && Math.abs(it.transform[5]-lastY)>3){ if(line.trim())out.push(line.trim()); line=''; }
+      line+=it.str+(it.hasEOL?' ':''); lastY=it.transform[5];
+    });
+    if(line.trim())out.push(line.trim());
+  }
+  return out;
+}
+async function retranslateDoc(){
+  if(!lastDocParagraphs) return;
+  const grid=$('docGrid');
+  grid.innerHTML='<div class="panel"><div class="phead">原文</div><div class="out">'+esc(lastDocParagraphs.join('\n\n'))+'</div></div>'+
+    '<div class="panel"><div class="phead">译文 · '+$('tgt').selectedOptions[0].text+'</div><div class="out"><span class="spinner"></span> 翻译中…</div></div>';
+  try{
+    lastDocTrans = await apiTranslate(lastDocParagraphs, $('src').value, $('tgt').value);
+    grid.children[1].querySelector('.out').innerHTML = esc(lastDocTrans.join('\n\n'));
+  }catch(e){ grid.children[1].querySelector('.out').innerHTML='<span class="err">翻译失败：'+esc(e.message)+'</span>'; }
+}
+function exportDocTxt(){
+  if(!lastDocTrans) return;
+  let s=''; lastDocParagraphs.forEach((p,i)=>{ s+='【原文】'+p+'\n【译文】'+(lastDocTrans[i]||'')+'\n\n'; });
+  downloadBlob(new Blob([s],{type:'text/plain;charset=utf-8'}), baseName(lastDocName)+'_对照.txt');
+}
+function exportDocWord(){
+  if(!lastDocTrans) return;
+  let rows='';
+  lastDocParagraphs.forEach((p,i)=>{ rows+='<p style="color:#888;margin:8px 0 2px">'+esc(p)+'</p><p style="margin:0 0 10px"><b>'+esc(lastDocTrans[i]||'')+'</b></p>'; });
+  const html='<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"></head><body>'+rows+'</body></html>';
+  downloadBlob(new Blob(['﻿'+html],{type:'application/msword'}), baseName(lastDocName)+'_对照.doc');
+}
+
+// ================= TABLE MODE =================
+let lastWB=null, lastSheetData=null, lastTableTrans=null, lastTableName='';
+wireDrop($('tableDrop'), $('tableInput'), handleTable);
+$('tableReset').addEventListener('click',()=>{ $('tableResult').classList.add('hide'); $('tableDrop').classList.remove('hide'); $('tableInput').value=''; });
+$('tableExport').addEventListener('click',exportTable);
+
+async function handleTable(file){
+  $('tableErr').classList.add('hide');
+  lastTableName=file.name;
+  try{
+    const buf=await file.arrayBuffer();
+    const wb=XLSX.read(buf,{type:'array'});
+    const ws=wb.Sheets[wb.SheetNames[0]];
+    const data=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+    if(!data.length) throw new Error('表格为空');
+    lastSheetData=data;
+    $('tableDrop').classList.add('hide'); $('tableResult').classList.remove('hide');
+    $('tableName').textContent='📊 '+file.name+' · '+data.length+' 行';
+    const cells=[]; const map=[];
+    data.forEach((row,r)=>row.forEach((c,ci)=>{ if(typeof c==='string' && c.trim() && isNaN(c)){ map.push([r,ci,cells.length]); cells.push(c); } }));
+    $('tableStat').innerHTML='<span class="spinner"></span> 翻译 '+cells.length+' 个单元格…';
+    const trans = cells.length ? await apiTranslate(cells, $('src').value, $('tgt').value) : [];
+    const outData = data.map(row=>row.slice());
+    map.forEach(([r,ci,idx])=>{ outData[r][ci]=trans[idx]; });
+    lastTableTrans=outData;
+    $('tableStat').textContent='完成 · 已翻译 '+cells.length+' 格';
+    renderTable(outData);
+  }catch(e){ $('tableErr').textContent='处理失败：'+e.message; $('tableErr').classList.remove('hide'); }
+}
+function renderTable(data){
+  let h='<table class="tt">';
+  data.slice(0,200).forEach(row=>{ h+='<tr>'; row.forEach(c=>h+='<td>'+esc(String(c==null?'':c))+'</td>'); h+='</tr>'; });
+  h+='</table>';
+  if(data.length>200) h+='<div class="hint" style="padding:8px">仅预览前 200 行，导出文件为完整内容�"</div>';
+  $('tablePreview').innerHTML=h;
+}
+function exportTable(){
+  if(!lastTableTrans) return;
+  const ws=XLSX.utils.aoa_to_sheet(lastTableTrans);
+  const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'翻译结果');
+  XLSX.writeFile(wb, baseName(lastTableName)+'_翻译.xlsx');
+}
+
+// ================= IMAGE MODE =================
+let lastImgOriginal='', lastImgTrans='';
+wireDrop($('imgDrop'), $('imgInput'), handleImage);
+$('imgReset').addEventListener('click',()=>{ $('imgResult').classList.add('hide'); $('imgDrop').classList.remove('hide'); $('imgInput').value=''; });
+$('imgCopy').addEventListener('click',()=>{ if(lastImgTrans){navigator.clipboard.writeText(lastImgTrans);toast('已复制译文');} });
+$('imgSpeakIn').addEventListener('click',e=>speak(lastImgOriginal, $('src').value==='auto'?$('tgt').value:$('src').value, e.target));
+$('imgSpeakOut').addEventListener('click',e=>speak(lastImgTrans, $('tgt').value, e.target));
+
+async function handleImage(file){
+  $('imgErr').classList.add('hide');
+  if(!file.type.startsWith('image/')){ $('imgErr').textContent='请上传图片文件'; $('imgErr').classList.remove('hide'); return; }
+  const dataUrl = await fileToDataUrl(file);
+  $('imgDrop').classList.add('hide'); $('imgResult').classList.remove('hide');
+  $('imgPreview').src=dataUrl;
+  $('imgOriginal').textContent='识别中…'; $('imgTranslation').innerHTML='<span class="spinner"></span>';
+  try{
+    const r = await apiOcr(dataUrl, $('src').value, $('tgt').value);
+    lastImgOriginal=r.original||''; lastImgTrans=r.translation||'';
+    $('imgOriginal').textContent = lastImgOriginal || '（未识别到文字）';
+    $('imgTranslation').textContent = lastImgTrans || '（无译文）';
+  }catch(e){ $('imgOriginal').textContent=''; $('imgTranslation').innerHTML='<span class="err">识别失败：'+esc(e.message)+'</span>'; }
+}
+
+// ================= utils =================
+function esc(s){ return String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function fileToDataUrl(file){ return new Promise((res,rej)=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result); fr.onerror=rej; fr.readAsDataURL(file); }); }
+function downloadBlob(blob, name){ const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),1000); }
+function baseName(n){ return (n||'file').replace(/\.[^.]+$/,''); }
+</script>
+</body>
+</html>
