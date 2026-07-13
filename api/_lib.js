@@ -80,7 +80,7 @@ async function callOpenAIChat(messages, { json = false } = {}) {
   const body = { model: cfg.model, messages, temperature: 0.2 };
   if (json) body.response_format = { type: 'json_object' };
 
-  const MAX = 5;
+  const MAX = 8;
   let lastErr = '';
   for (let attempt = 0; attempt < MAX; attempt++) {
     let resp;
@@ -104,7 +104,7 @@ async function callOpenAIChat(messages, { json = false } = {}) {
     // Rate limit / concurrency cap (HTTP 429 or Zhipu code 1302) — wait and retry.
     if (isRateLimit(resp.status, t)) {
       lastErr = '翻译服务限速（' + resp.status + '）：' + t.slice(0, 160);
-      await sleep(1300 * (attempt + 1));
+      await sleep(2000 * (attempt + 1));
       continue;
     }
     throw new Error('翻译服务返回错误 ' + resp.status + '：' + t.slice(0, 300));
@@ -138,6 +138,7 @@ async function translateBatchOpenAI(texts, sourceLang, targetLang) {
     out = [];
     for (const t of texts) {
       if (!t || !t.trim()) { out.push(t); continue; }
+      await sleep(500);
       const c = await callOpenAIChat([
         { role: 'system', content: 'Translate the user text into ' + langName(targetLang) + '. Output only the translation, no quotes, no notes.' },
         { role: 'user', content: t }
@@ -205,7 +206,7 @@ async function translate(texts, sourceLang, targetLang) {
   for (const c of chunks) {
     const r = await doBatch(c, sourceLang, targetLang);
     results.push(...r);
-    await sleep(300);
+    await sleep(500);
   }
   return results;
 }
