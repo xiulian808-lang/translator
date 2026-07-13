@@ -35,6 +35,13 @@ const DEEPL_TARGET = {
 };
 const DEEPL_SOURCE = { ...DEEPL_TARGET, 'zh-TW': 'ZH' };
 
+const crypto = require('crypto');
+function md5(s) { return crypto.createHash('md5').update(s, 'utf8').digest('hex'); }
+const BAIDU_LANG = { auto: 'auto', zh: 'zh', 'zh-TW': 'cht', en: 'en', ja: 'jp', ko: 'kor', es: 'spa', fr: 'fra', de: 'de', ru: 'ru', pt: 'pt', it: 'it', ar: 'ara', th: 'th', vi: 'vie', id: 'id', hi: 'hi', tr: 'tr', nl: 'nl', pl: 'pl' };
+function baiduLang(code) { return BAIDU_LANG[code] || code || 'en'; }
+const GOOGLE_LANG = { auto: 'auto', zh: 'zh-CN', 'zh-TW': 'zh-TW', en: 'en', ja: 'ja', ko: 'ko', es: 'es', fr: 'fr', de: 'de', ru: 'ru', pt: 'pt', it: 'it', ar: 'ar', th: 'th', vi: 'vi', id: 'id', hi: 'hi', tr: 'tr', nl: 'nl', pl: 'pl' };
+function googleLang(code) { return GOOGLE_LANG[code] || code || 'en'; }
+
 function getProvider() {
   return (process.env.PROVIDER || 'openai').toLowerCase();
 }
@@ -135,6 +142,7 @@ async function translateBatchOpenAI(texts, sourceLang, targetLang) {
   const parsed = extractJson(content);
   let out = parsed && Array.isArray(parsed.dst) ? parsed.dst : null;
   if (!out || out.length !== texts.length) {
+    // Alignment failed — translate each item individually as a fallback.
     out = new Array(texts.length);
     let fnext = 0;
     async function fworker() {
@@ -184,12 +192,76 @@ async function translateBatchDeepL(texts, sourceLang, targetLang) {
   return (data.translations || []).map((x) => x.text);
 }
 
+async function translateBatchBaidu(texts, sourceLang, targetLang) {
+  const appid = process.env.BAIDU_APPID, key = process.env.BAIDU_KEY;
+  if (!appid || !key) throw new Error('服务器未配置 BAIDU_APPID / BAIDU_KEY。');
+  const from = baiduLang(sourceLang && sourceLang !== 'auto' ? sourceLang : 'auto');
+  const to = baiduLang(targetLang);
+  const items = texts.map((t) => { const one = (t == null ? '' : String(t)).replace(/\s*\n\s*/g, ' ').trim(); return one === '' ? ' ' : one; });
+  const q = items.join('\n');
+  const salt = String(Date.now());
+  const sign = md5(appid + q + salt + key);
+  const params = new URLSearchParams({ q, from, to, appid, salt, sign });
+  const MAX = 6;
+  let lastErr = '';
+  for (let attempt = 0; attempt < MAX; attempt++) {
+    let data;
+    try {
+      const resp = await fetch('https://fanyi-api.baidu.com/api/trans/vip/translate', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: params.toString() });
+      data = await resp.json();
+    } catch (e) { lastErr = '无法连接百度翻译：' + e.message; await sleep(700 * (attempt + 1)); continue; }
+    if (data.error_code) {
+      const code = String(data.error_code);
+      if (code === '54003' || code === '54005') { lastErr = '百度翻译限速（' + code + '）'; await sleep(1100 * (attempt + 1)); continue; }
+      throw new Error('百度翻译错误 ' + code + '：' + (data.error_msg || ''));
+    }
+    const arr = (data.trans_result || []).map((x) => x.dst);
+    const out = [];
+    for (let i = 0; i < texts.length; i++) {
+      const orig = texts[i];
+      if (orig == null || String(orig).trim() === '') { out.push(orig); }
+      else { out.push(arr[i] != null ? arr[i] : orig); }
+    }
+    return out;
+  }
+  throw new Error(lastErr || '百度翻译繁忙，多次重试仍失败，请稍后再试。');
+}
+
+async function translateBatchGoogle(texts, sourceLang, targetLang) {
+  const sl = googleLang(sourceLang && sourceLang !== 'auto' ? sourceLang : 'auto');
+  const tl = googleLang(targetLang);
+  const items = texts.map((t) => (t == null ? '' : String(t)).replace(/\n/g, ' '));
+  const q = items.join('\n');
+  const MAX = 5;
+  let lastErr = '';
+  for (let attempt = 0; attempt < MAX; attempt++) {
+    try {
+      const body = new URLSearchParams({ client: 'gtx', dt: 't', sl, tl, q });
+      const resp = await fetch('https://translate.googleapis.com/translate_a/single', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': 'Mozilla/5.0' }, body: body.toString() });
+      if (!resp.ok) { lastErr = '谷歌翻译限速/错误（' + resp.status + '）'; await sleep(900 * (attempt + 1)); continue; }
+      const data = await resp.json();
+      const segs = (data && data[0]) || [];
+      let full = '';
+      for (const seg of segs) { if (seg && seg[0] != null) full += seg[0]; }
+      const lines = full.split('\n');
+      const out = [];
+      for (let i = 0; i < texts.length; i++) {
+        const orig = texts[i];
+        if (orig == null || String(orig).trim() === '') { out.push(orig); }
+        else { out.push(lines[i] != null ? lines[i] : orig); }
+      }
+      return out;
+    } catch (e) { lastErr = '无法连接谷歌翻译：' + e.message; await sleep(700 * (attempt + 1)); continue; }
+  }
+  throw new Error(lastErr || '谷歌翻译繁忙，多次重试仍失败，请稍后再试。');
+}
+
 // Split an array of texts into char-budget-limited chunks, translate each, merge.
 async function translate(texts, sourceLang, targetLang) {
   const provider = getProvider();
-  const doBatch = provider === 'deepl' ? translateBatchDeepL : translateBatchOpenAI;
+  const doBatch = provider === 'deepl' ? translateBatchDeepL : provider === 'baidu' ? translateBatchBaidu : provider === 'google' ? translateBatchGoogle : translateBatchOpenAI;
 
-  const CHUNK_CHARS = 1200;
+  const CHUNK_CHARS = provider === 'baidu' ? 4500 : provider === 'google' ? 3000 : 1200;
   const chunks = [];
   let cur = [];
   let curLen = 0;
@@ -202,6 +274,7 @@ async function translate(texts, sourceLang, targetLang) {
     }
     cur.push(t);
     curLen += len;
+    // A single very long segment goes out on its own.
     if (len > CHUNK_CHARS) {
       chunks.push(cur);
       cur = [];
