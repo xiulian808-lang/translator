@@ -71,6 +71,14 @@
   .cvrow input,.cvrow .cvresult{flex:1;border:1px solid var(--line);border-radius:12px;padding:14px 16px;font-size:22px;font-weight:600;background:var(--panel);color:var(--ink);outline:none;min-width:0}
   .cvrow .cvresult{display:flex;align-items:center;overflow:auto;white-space:nowrap}
   .cvrow select{font-size:16px;min-width:130px}
+  .vidwrap{position:relative;margin-top:12px;background:#000;border-radius:12px;overflow:hidden}
+  .vidwrap video{width:100%;display:block;max-height:60vh}
+  .vidsub{position:absolute;left:0;right:0;bottom:8%;text-align:center;padding:0 6%;pointer-events:none;font-size:20px;font-weight:600;color:#fff;text-shadow:0 2px 4px rgba(0,0,0,.9),0 0 6px rgba(0,0,0,.85);white-space:pre-wrap;line-height:1.4}
+  .vseg{display:flex;gap:10px;padding:8px 10px;border-bottom:1px solid var(--line);font-size:13.5px;cursor:pointer}
+  .vseg:hover{background:var(--brand-soft)}
+  .vseg .vt{color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums;min-width:44px}
+  .vseg .vc b{color:var(--ink);font-weight:600}
+  .vseg .vc div{color:var(--muted);margin-top:2px}
 </style>
 </head>
 <body>
@@ -86,6 +94,7 @@
     <button class="tab" data-mode="table">📊 表格</button>
     <button class="tab" data-mode="image">🖼️ 图片</button>
     <button class="tab" data-mode="currency">💱 汇率</button>
+    <button class="tab" data-mode="video">🎬 视频</button>
   </div>
 
   <div class="langbar">
@@ -220,6 +229,29 @@
     </div>
     <div class="hint" style="text-align:center;margin-top:12px">汇率为实时参考价，仅供参考，实际成交以银行/平台为准。</div>
   </section>
+  <!-- ================= 视频模式 ================= -->
+  <section id="mode-video" class="hide">
+    <div class="drop" id="videoDrop">
+      <div class="big">🎬</div>
+      <div><b>点击或拖入视频</b>（MP4 等，无需字幕）</div>
+      <div class="hint" style="margin-top:6px">在你浏览器本地识别语音并翻译，视频不上传服务器；首次使用会下载一个识别模型（约几十 MB，仅一次）</div>
+      <input type="file" id="videoInput" accept="video/*" class="hide" />
+    </div>
+    <div id="videoResult" class="hide">
+      <div class="filerow">
+        <span class="chip" id="videoName"></span>
+        <button class="btn ghost" id="videoReset">换一个视频</button>
+        <button class="btn ghost hide" id="videoExport">导出中文字幕 .srt</button>
+      </div>
+      <div class="vidwrap">
+        <video id="videoPlayer" controls playsinline></video>
+        <div class="vidsub" id="videoSub"></div>
+      </div>
+      <div class="hint" id="videoStatus" style="margin-top:10px"></div>
+      <div id="videoSegs" style="margin-top:10px;max-height:340px;overflow:auto;border-radius:12px;border:1px solid var(--line)"></div>
+    </div>
+    <div class="err hide" id="videoErr"></div>
+  </section>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -296,8 +328,8 @@ document.querySelectorAll('.tab').forEach(tab=>{
     document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
     tab.classList.add('active');
     state.mode = tab.dataset.mode;
-    ['text','doc','table','image','currency'].forEach(m=>$('mode-'+m).classList.toggle('hide', m!==state.mode));
-    const hints={text:'适合复制粘贴文案、句子、段落',doc:'上传 Word / PDF / TXT',table:'上传 Excel / CSV',image:'上传截图或图片',currency:'实时货币换算'};
+    ['text','doc','table','image','currency','video'].forEach(m=>$('mode-'+m).classList.toggle('hide', m!==state.mode));
+    const hints={text:'适合复制粘贴文案、句子、段落',doc:'上传 Word / PDF / TXT',table:'上传 Excel / CSV',image:'上传截图或图片',currency:'实时货币换算',video:'上传视频，本地识别语音并翻译'};
     $('modeHint').textContent = hints[state.mode]||'';
     // 汇率模式不需要语言选择栏
     document.querySelector('.langbar').classList.toggle('hide', state.mode==='currency');
@@ -447,10 +479,12 @@ async function handleTable(file){
     lastSheetData=data;
     $('tableDrop').classList.add('hide'); $('tableResult').classList.remove('hide');
     $('tableName').textContent='📊 '+file.name+' · '+data.length+' 行';
+    // collect unique non-empty string cells
     const cells=[]; const map=[];
     data.forEach((row,r)=>row.forEach((c,ci)=>{ if(typeof c==='string' && c.trim() && isNaN(c)){ map.push([r,ci,cells.length]); cells.push(c); } }));
     $('tableStat').innerHTML='<span class="spinner"></span> 翻译 '+cells.length+' 个单元格…';
     const trans = cells.length ? await apiTranslate(cells, $('src').value, $('tgt').value) : [];
+    // build translated copy
     const outData = data.map(row=>row.slice());
     map.forEach(([r,ci,idx])=>{ outData[r][ci]=trans[idx]; });
     lastTableTrans=outData;
@@ -462,7 +496,7 @@ function renderTable(data){
   let h='<table class="tt">';
   data.slice(0,200).forEach(row=>{ h+='<tr>'; row.forEach(c=>h+='<td>'+esc(String(c==null?'':c))+'</td>'); h+='</tr>'; });
   h+='</table>';
-  if(data.length>200) h+='<div class="hint" style="padding:8px">仅预览前 200 行，导出文件为完整内容�"</div>';
+  if(data.length>200) h+='<div class="hint" style="padding:8px">仅预览前 200 行，导出文件为完整内容。</div>';
   $('tablePreview').innerHTML=h;
 }
 function exportTable(){
@@ -547,11 +581,95 @@ function cvCompute(){
   $('cvRate').innerHTML = '1 '+from+' = <b>'+cvFmt(one)+'</b> '+to+' &nbsp;·&nbsp; 1 '+to+' = <b>'+cvFmt(rf/rt)+'</b> '+from+'<br>'+t;
 }
 
+// ================= VIDEO MODE =================
+let videoSegs=null, videoFileName='';
+wireDrop($('videoDrop'), $('videoInput'), handleVideo);
+$('videoReset').addEventListener('click',()=>{
+  $('videoResult').classList.add('hide'); $('videoDrop').classList.remove('hide'); $('videoInput').value='';
+  const v=$('videoPlayer'); try{v.pause();}catch(e){} v.removeAttribute('src'); v.load();
+  videoSegs=null; $('videoSegs').innerHTML=''; $('videoSub').textContent=''; $('videoStatus').textContent=''; $('videoExport').classList.add('hide');
+});
+$('videoExport').addEventListener('click',exportSrt);
+function vFmtSrt(s){ const h=Math.floor(s/3600),m=Math.floor(s%3600/60),sec=Math.floor(s%60),ms=Math.round((s-Math.floor(s))*1000); return String(h).padStart(2,'0')+':'+String(m).padStart(2,'0')+':'+String(sec).padStart(2,'0')+','+String(ms).padStart(3,'0'); }
+function vFmtClock(s){ const m=Math.floor(s/60),sec=Math.floor(s%60); return m+':'+String(sec).padStart(2,'0'); }
+async function handleVideo(file){
+  $('videoErr').classList.add('hide');
+  if(!(file.type&&file.type.startsWith('video/')) && !/\.(mp4|mov|mkv|webm|m4v|avi)$/i.test(file.name)){ $('videoErr').textContent='请上传视频文件'; $('videoErr').classList.remove('hide'); return; }
+  if(typeof window.__videoTranslate!=='function'){ $('videoErr').textContent='识别模块尚未加载完成，请稍等几秒或刷新页面后重试'; $('videoErr').classList.remove('hide'); return; }
+  videoFileName=file.name;
+  $('videoDrop').classList.add('hide'); $('videoResult').classList.remove('hide');
+  $('videoName').textContent='🎬 '+file.name; $('videoExport').classList.add('hide'); $('videoSegs').innerHTML=''; $('videoSub').textContent='';
+  const v=$('videoPlayer'); v.src=URL.createObjectURL(file);
+  const setStatus=(msg)=>{ $('videoStatus').innerHTML='<span class="spinner"></span> '+esc(msg); };
+  try{
+    const segs = await window.__videoTranslate(file, setStatus, $('tgt').value);
+    videoSegs=segs;
+    if(!segs || !segs.length){ $('videoStatus').textContent='没有识别到可翻译的语音内容。'; return; }
+    $('videoStatus').textContent='完成 · 共 '+segs.length+' 段，播放时会自动显示字幕。点下面任意一句可跳到对应画面。';
+    renderVideoSegs(segs); $('videoExport').classList.remove('hide');
+    v.ontimeupdate=()=>{ const t=v.currentTime; let cur=''; for(const s of segs){ if(t>=s.start && t<=s.end){ cur=s.dst; break; } } $('videoSub').textContent=cur; };
+  }catch(e){ $('videoStatus').textContent=''; $('videoErr').textContent='视频处理失败：'+((e&&e.message)||e); $('videoErr').classList.remove('hide'); }
+}
+function renderVideoSegs(segs){
+  let h='';
+  segs.forEach((s)=>{ h+='<div class="vseg" data-t="'+s.start+'"><span class="vt">'+vFmtClock(s.start)+'</span><span class="vc"><b>'+esc(s.dst)+'</b><div>'+esc(s.src)+'</div></span></div>'; });
+  const el=$('videoSegs'); el.innerHTML=h;
+  el.querySelectorAll('.vseg').forEach(d=>d.addEventListener('click',()=>{ const v=$('videoPlayer'); v.currentTime=parseFloat(d.dataset.t)||0; v.play().catch(()=>{}); }));
+}
+function exportSrt(){
+  if(!videoSegs||!videoSegs.length) return;
+  let s=''; videoSegs.forEach((seg,i)=>{ s+=(i+1)+'\n'+vFmtSrt(seg.start)+' --> '+vFmtSrt(seg.end)+'\n'+(seg.dst||'')+'\n\n'; });
+  downloadBlob(new Blob(['﻿'+s],{type:'text/plain;charset=utf-8'}), baseName(videoFileName)+'_译文字幕.srt');
+}
+
 // ================= utils =================
 function esc(s){ return String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
 function fileToDataUrl(file){ return new Promise((res,rej)=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result); fr.onerror=rej; fr.readAsDataURL(file); }); }
 function downloadBlob(blob, name){ const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),1000); }
 function baseName(n){ return (n||'file').replace(/\.[^.]+$/,''); }
+</script>
+<script type="module">
+  import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.2';
+  // 允许从网络下载模型；用国内可达的 HuggingFace 镜像
+  env.allowLocalModels = false;
+  try { env.remoteHost = 'https://hf-mirror.com'; } catch(e){}
+  let transcriber = null;
+  window.__videoTranslate = async function(file, onStatus, targetLang){
+    onStatus('读取视频音频…');
+    const ab = await file.arrayBuffer();
+    const AC = window.AudioContext || window.webkitAudioContext;
+    const ctx = new AC({ sampleRate: 16000 });
+    let decoded;
+    try { decoded = await ctx.decodeAudioData(ab.slice(0)); }
+    catch(e){ throw new Error('无法从该视频提取音频（可能是浏览器不支持的编码）。建议转成 MP4（H.264 + AAC）后再试。'); }
+    let audio = decoded.getChannelData(0);
+    if (decoded.numberOfChannels > 1) {
+      const b = decoded.getChannelData(1);
+      const m = new Float32Array(audio.length);
+      for (let i = 0; i < audio.length; i++) m[i] = (audio[i] + b[i]) / 2;
+      audio = m;
+    }
+    onStatus('加载识别模型（首次需下载，请稍候）…');
+    if (!transcriber) {
+      transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny', {
+        progress_callback: (p) => { if (p && p.status === 'progress') onStatus('下载识别模型 ' + Math.round(p.progress || 0) + '%（仅首次）'); }
+      });
+    }
+    onStatus('识别语音中…（视频越长越久，请耐心等待）');
+    const result = await transcriber(audio, { return_timestamps: true, chunk_length_s: 30, stride_length_s: 5 });
+    const chunks = (result.chunks || []).filter(c => c && c.text && c.text.trim() && c.timestamp && c.timestamp[0] != null);
+    if (!chunks.length) return [];
+    onStatus('翻译字幕中…');
+    const texts = chunks.map(c => c.text.trim());
+    let trans = texts;
+    try {
+      const r = await fetch('/api/translate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ texts, sourceLang: 'auto', targetLang }) });
+      const d = await r.json();
+      if (d && d.translations && d.translations.length === texts.length) trans = d.translations;
+    } catch (e) {}
+    return chunks.map((c, i) => ({ start: c.timestamp[0], end: (c.timestamp[1] != null ? c.timestamp[1] : c.timestamp[0] + 3), src: texts[i], dst: trans[i] || '' }));
+  };
+  window.__videoReady = true;
 </script>
 </body>
 </html>
