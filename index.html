@@ -67,6 +67,10 @@
   .err{color:#e5484d;font-size:13.5px;margin-top:8px}
   .speaking{color:var(--brand)!important;background:var(--brand-soft)!important}
   .hide{display:none!important}
+  .cvrow{display:flex;gap:12px;align-items:stretch}
+  .cvrow input,.cvrow .cvresult{flex:1;border:1px solid var(--line);border-radius:12px;padding:14px 16px;font-size:22px;font-weight:600;background:var(--panel);color:var(--ink);outline:none;min-width:0}
+  .cvrow .cvresult{display:flex;align-items:center;overflow:auto;white-space:nowrap}
+  .cvrow select{font-size:16px;min-width:130px}
 </style>
 </head>
 <body>
@@ -81,6 +85,7 @@
     <button class="tab" data-mode="doc">📄 文档</button>
     <button class="tab" data-mode="table">📊 表格</button>
     <button class="tab" data-mode="image">🖼️ 图片</button>
+    <button class="tab" data-mode="currency">💱 汇率</button>
   </div>
 
   <div class="langbar">
@@ -197,6 +202,24 @@
     </div>
     <div class="err hide" id="imgErr"></div>
   </section>
+
+  <!-- ================= 汇率模式 ================= -->
+  <section id="mode-currency" class="hide">
+    <div class="panel" style="max-width:620px;margin:0 auto;padding:24px 26px">
+      <div class="cvrow">
+        <input type="number" id="cvAmount" value="1" min="0" step="any" />
+        <select id="cvFrom"></select>
+      </div>
+      <div style="text-align:center;margin:12px 0"><button class="swap" id="cvSwap" title="互换货币">⇅</button></div>
+      <div class="cvrow">
+        <div class="cvresult" id="cvResult">—</div>
+        <select id="cvTo"></select>
+      </div>
+      <div class="hint" id="cvRate" style="margin-top:16px;text-align:center;line-height:1.6">正在获取实时汇率…</div>
+      <div class="err hide" id="cvErr" style="text-align:center"></div>
+    </div>
+    <div class="hint" style="text-align:center;margin-top:12px">汇率为实时参考价，仅供参考，实际成交以银行/平台为准。</div>
+  </section>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -273,9 +296,12 @@ document.querySelectorAll('.tab').forEach(tab=>{
     document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
     tab.classList.add('active');
     state.mode = tab.dataset.mode;
-    ['text','doc','table','image'].forEach(m=>$('mode-'+m).classList.toggle('hide', m!==state.mode));
-    const hints={text:'适合复制粘贴文案、句子、段落',doc:'上传 Word / PDF / TXT',table:'上传 Excel / CSV',image:'上传截图或图片'};
+    ['text','doc','table','image','currency'].forEach(m=>$('mode-'+m).classList.toggle('hide', m!==state.mode));
+    const hints={text:'适合复制粘贴文案、句子、段落',doc:'上传 Word / PDF / TXT',table:'上传 Excel / CSV',image:'上传截图或图片',currency:'实时货币换算'};
     $('modeHint').textContent = hints[state.mode]||'';
+    // 汇率模式不需要语言选择栏
+    document.querySelector('.langbar').classList.toggle('hide', state.mode==='currency');
+    if(state.mode==='currency') initCurrency();
   });
 });
 $('modeHint').textContent='适合复制粘贴文案、句子、段落';
@@ -467,6 +493,58 @@ async function handleImage(file){
     $('imgOriginal').textContent = lastImgOriginal || '（未识别到文字）';
     $('imgTranslation').textContent = lastImgTrans || '（无译文）';
   }catch(e){ $('imgOriginal').textContent=''; $('imgTranslation').innerHTML='<span class="err">识别失败：'+esc(e.message)+'</span>'; }
+}
+
+// ================= CURRENCY MODE =================
+const CURRENCIES = [
+  ['USD','美元 $'],['CNY','人民币 ¥'],['JPY','日元 ¥'],['EUR','欧元 €'],['GBP','英镑 £'],
+  ['HKD','港币 HK$'],['KRW','韩元 ₩'],['TWD','新台币 NT$'],['AUD','澳元 A$'],['CAD','加元 C$'],
+  ['SGD','新加坡元 S$'],['THB','泰铢 ฿'],['VND','越南盾 ₫'],['INR','印度卢比 ₹'],['RUB','卢布 ₽'],
+  ['MYR','马来西亚林吉特'],['IDR','印尼盾'],['PHP','菲律宾比索'],['BRL','巴西雷亚尔'],['MXN','墨西哥比索'],
+  ['AED','阿联酋迪拉姆'],['TRY','土耳其里拉'],['CHF','瑞士法郎'],['NZD','新西兰元'],['SAR','沙特里亚尔']
+];
+let cvRates=null, cvLoaded=false;
+function cvFill(sel){ sel.innerHTML=''; CURRENCIES.forEach(([c,n])=>{ const o=document.createElement('option'); o.value=c; o.textContent=n; sel.appendChild(o); }); }
+async function initCurrency(){
+  if(!cvLoaded){
+    cvFill($('cvFrom')); cvFill($('cvTo'));
+    $('cvFrom').value='USD'; $('cvTo').value='CNY';
+    $('cvAmount').addEventListener('input', cvCompute);
+    $('cvFrom').addEventListener('change', cvCompute);
+    $('cvTo').addEventListener('change', cvCompute);
+    $('cvSwap').addEventListener('click',()=>{ const f=$('cvFrom').value; $('cvFrom').value=$('cvTo').value; $('cvTo').value=f; cvCompute(); });
+    cvLoaded=true;
+  }
+  if(!cvRates) await cvFetch();
+  else cvCompute();
+}
+async function cvFetch(){
+  $('cvErr').classList.add('hide');
+  $('cvRate').textContent='正在获取实时汇率…';
+  try{
+    const r = await fetch('https://open.er-api.com/v6/latest/USD');
+    const d = await r.json();
+    if(!d || !d.rates) throw new Error('汇率数据获取失败');
+    cvRates = d.rates; cvRates.__time = d.time_last_update_utc || '';
+    cvCompute();
+  }catch(e){
+    $('cvRate').textContent='';
+    $('cvErr').textContent='获取汇率失败，请检查网络后重试：'+e.message;
+    $('cvErr').classList.remove('hide');
+  }
+}
+function cvFmt(n){ return n.toLocaleString('en-US',{maximumFractionDigits:4}); }
+function cvCompute(){
+  if(!cvRates) return;
+  const from=$('cvFrom').value, to=$('cvTo').value;
+  const amt=parseFloat($('cvAmount').value);
+  const rf=cvRates[from], rt=cvRates[to];
+  if(!rf||!rt){ $('cvResult').textContent='暂不支持该货币'; return; }
+  const one = rt/rf;
+  if(isNaN(amt)){ $('cvResult').textContent='—'; }
+  else { $('cvResult').textContent = cvFmt(amt*one); }
+  const t = cvRates.__time ? '（更新于 '+cvRates.__time+'）' : '';
+  $('cvRate').innerHTML = '1 '+from+' = <b>'+cvFmt(one)+'</b> '+to+' &nbsp;·&nbsp; 1 '+to+' = <b>'+cvFmt(rf/rt)+'</b> '+from+'<br>'+t;
 }
 
 // ================= utils =================
