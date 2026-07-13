@@ -80,7 +80,7 @@ async function callOpenAIChat(messages, { json = false } = {}) {
   const body = { model: cfg.model, messages, temperature: 0.2 };
   if (json) body.response_format = { type: 'json_object' };
 
-  const MAX = 8;
+  const MAX = 4;
   let lastErr = '';
   for (let attempt = 0; attempt < MAX; attempt++) {
     let resp;
@@ -104,7 +104,7 @@ async function callOpenAIChat(messages, { json = false } = {}) {
     // Rate limit / concurrency cap (HTTP 429 or Zhipu code 1302) — wait and retry.
     if (isRateLimit(resp.status, t)) {
       lastErr = '翻译服务限速（' + resp.status + '）：' + t.slice(0, 160);
-      await sleep(2000 * (attempt + 1));
+      await sleep(500 * (attempt + 1));
       continue;
     }
     throw new Error('翻译服务返回错误 ' + resp.status + '：' + t.slice(0, 300));
@@ -150,7 +150,7 @@ async function translateBatchOpenAI(texts, sourceLang, targetLang) {
       }
     }
     const fworkers = [];
-    const fn = Math.min(6, texts.length);
+    const fn = Math.min(3, texts.length);
     for (let w = 0; w < fn; w++) fworkers.push(fworker());
     await Promise.all(fworkers);
   }
@@ -211,7 +211,7 @@ async function translate(texts, sourceLang, targetLang) {
   if (cur.length) chunks.push(cur);
 
   // Translate chunks in parallel (bounded concurrency) so large docs stay fast.
-  const CONCURRENCY = 6;
+  const CONCURRENCY = 4;
   const results = new Array(chunks.length);
   let next = 0;
   async function worker() {
