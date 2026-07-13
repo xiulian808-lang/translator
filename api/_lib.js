@@ -230,28 +230,45 @@ async function translateBatchBaidu(texts, sourceLang, targetLang) {
 async function translateBatchGoogle(texts, sourceLang, targetLang) {
   const sl = googleLang(sourceLang && sourceLang !== 'auto' ? sourceLang : 'auto');
   const tl = googleLang(targetLang);
-  const items = texts.map((t) => (t == null ? '' : String(t)).replace(/\n/g, ' '));
-  const q = items.join('\n');
+  const n = texts.length;
+  const out = new Array(n);
+  for (let i = 0; i < n; i++) out[i] = texts[i];
+  const idx = [], items = [];
+  for (let i = 0; i < n; i++) {
+    const s = texts[i] == null ? '' : String(texts[i]);
+    if (s.trim() === '') continue;
+    idx.push(i); items.push(s);
+  }
+  if (!items.length) return out;
+  async function gfetch(q) {
+    const body = new URLSearchParams({ client: 'gtx', dt: 't', sl, tl, q });
+    const resp = await fetch('https://translate.googleapis.com/translate_a/single', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': 'Mozilla/5.0' }, body: body.toString() });
+    if (!resp.ok) { const e = new Error('status ' + resp.status); e.status = resp.status; throw e; }
+    const data = await resp.json();
+    const segs = (data && data[0]) || [];
+    let full = '';
+    for (const seg of segs) { if (seg && seg[0] != null) full += seg[0]; }
+    return full;
+  }
   const MAX = 5;
   let lastErr = '';
   for (let attempt = 0; attempt < MAX; attempt++) {
     try {
-      const body = new URLSearchParams({ client: 'gtx', dt: 't', sl, tl, q });
-      const resp = await fetch('https://translate.googleapis.com/translate_a/single', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': 'Mozilla/5.0' }, body: body.toString() });
-      if (!resp.ok) { lastErr = '谷歌翻译限速/错误（' + resp.status + '）'; await sleep(900 * (attempt + 1)); continue; }
-      const data = await resp.json();
-      const segs = (data && data[0]) || [];
-      let full = '';
-      for (const seg of segs) { if (seg && seg[0] != null) full += seg[0]; }
-      const lines = full.split('\n');
-      const out = [];
-      for (let i = 0; i < texts.length; i++) {
-        const orig = texts[i];
-        if (orig == null || String(orig).trim() === '') { out.push(orig); }
-        else { out.push(lines[i] != null ? lines[i] : orig); }
+      const full = await gfetch(items.join('\n\n'));
+      const parts = full.split(/\n{2,}/);
+      if (parts.length === items.length) {
+        for (let k = 0; k < idx.length; k++) out[idx[k]] = parts[k].replace(/^\s+|\s+$/g, '');
+        return out;
       }
+      const full2 = await gfetch(items.map((x) => x.replace(/\s*\n\s*/g, ' ')).join('\n'));
+      const lines = full2.split('\n');
+      for (let k = 0; k < idx.length; k++) out[idx[k]] = lines[k] != null ? lines[k] : items[k];
       return out;
-    } catch (e) { lastErr = '无法连接谷歌翻译：' + e.message; await sleep(700 * (attempt + 1)); continue; }
+    } catch (e) {
+      lastErr = '谷歌翻译暂不可用：' + e.message;
+      await sleep(900 * (attempt + 1));
+      continue;
+    }
   }
   throw new Error(lastErr || '谷歌翻译繁忙，多次重试仍失败，请稍后再试。');
 }
