@@ -135,15 +135,24 @@ async function translateBatchOpenAI(texts, sourceLang, targetLang) {
   const parsed = extractJson(content);
   let out = parsed && Array.isArray(parsed.dst) ? parsed.dst : null;
   if (!out || out.length !== texts.length) {
-    out = [];
-    for (const t of texts) {
-      if (!t || !t.trim()) { out.push(t); continue; }
-      const c = await callOpenAIChat([
-        { role: 'system', content: 'Translate the user text into ' + langName(targetLang) + '. Output only the translation, no quotes, no notes.' },
-        { role: 'user', content: t }
-      ]);
-      out.push(c.trim());
+    out = new Array(texts.length);
+    let fnext = 0;
+    async function fworker() {
+      while (fnext < texts.length) {
+        const i = fnext++;
+        const t = texts[i];
+        if (!t || !t.trim()) { out[i] = t; continue; }
+        const c = await callOpenAIChat([
+          { role: 'system', content: 'Translate the user text into ' + langName(targetLang) + '. Output only the translation, no quotes, no notes.' },
+          { role: 'user', content: t }
+        ]);
+        out[i] = c.trim();
+      }
     }
+    const fworkers = [];
+    const fn = Math.min(6, texts.length);
+    for (let w = 0; w < fn; w++) fworkers.push(fworker());
+    await Promise.all(fworkers);
   }
   return out;
 }
@@ -180,7 +189,7 @@ async function translate(texts, sourceLang, targetLang) {
   const provider = getProvider();
   const doBatch = provider === 'deepl' ? translateBatchDeepL : translateBatchOpenAI;
 
-  const CHUNK_CHARS = 3500;
+  const CHUNK_CHARS = 1200;
   const chunks = [];
   let cur = [];
   let curLen = 0;
