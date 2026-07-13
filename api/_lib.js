@@ -138,7 +138,6 @@ async function translateBatchOpenAI(texts, sourceLang, targetLang) {
     out = [];
     for (const t of texts) {
       if (!t || !t.trim()) { out.push(t); continue; }
-      await sleep(500);
       const c = await callOpenAIChat([
         { role: 'system', content: 'Translate the user text into ' + langName(targetLang) + '. Output only the translation, no quotes, no notes.' },
         { role: 'user', content: t }
@@ -202,13 +201,21 @@ async function translate(texts, sourceLang, targetLang) {
   }
   if (cur.length) chunks.push(cur);
 
-  const results = [];
-  for (const c of chunks) {
-    const r = await doBatch(c, sourceLang, targetLang);
-    results.push(...r);
-    await sleep(500);
+  // Translate chunks in parallel (bounded concurrency) so large docs stay fast.
+  const CONCURRENCY = 6;
+  const results = new Array(chunks.length);
+  let next = 0;
+  async function worker() {
+    while (next < chunks.length) {
+      const i = next++;
+      results[i] = await doBatch(chunks[i], sourceLang, targetLang);
+    }
   }
-  return results;
+  const workers = [];
+  const n = Math.min(CONCURRENCY, chunks.length);
+  for (let w = 0; w < n; w++) workers.push(worker());
+  await Promise.all(workers);
+  return results.flat();
 }
 
 // --- Vision OCR + translate (OpenAI-compatible vision models only) ---
