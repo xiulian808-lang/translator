@@ -231,6 +231,10 @@
   </section>
   <!-- ================= 视频模式 ================= -->
   <section id="mode-video" class="hide">
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
+      <input type="text" id="videoUrl" placeholder="粘贴 TikTok 或 Google Drive 视频链接…" style="flex:1;min-width:220px;border:1px solid var(--line);border-radius:12px;padding:11px 14px;font-size:14px;background:var(--panel);color:var(--ink);outline:none" />
+      <button class="btn" id="videoUrlBtn">解析并翻译</button>
+    </div>
     <div class="drop" id="videoDrop">
       <div class="big">🎬</div>
       <div><b>点击或拖入视频</b>（MP4 等，无需字幕）</div>
@@ -584,6 +588,31 @@ function cvCompute(){
 // ================= VIDEO MODE =================
 let videoSegs=null, videoFileName='';
 wireDrop($('videoDrop'), $('videoInput'), handleVideo);
+  $('videoUrlBtn').addEventListener('click', handleVideoUrl);
+  $('videoUrl').addEventListener('keydown', function(e){ if(e.key==='Enter') handleVideoUrl(); });
+  async function handleVideoUrl(){
+    const url = $('videoUrl').value.trim();
+    if(!url) return;
+    $('videoErr').classList.add('hide');
+    if(typeof window.__videoTranslate!=='function'){ $('videoErr').textContent='识别模块尚未加载完成，请稍等几秒或刷新页面后重试'; $('videoErr').classList.remove('hide'); return; }
+    $('videoDrop').classList.add('hide'); $('videoResult').classList.remove('hide');
+    $('videoName').textContent='🔗 '+url.slice(0,60); $('videoExport').classList.add('hide');
+    $('videoSegs').innerHTML=''; $('videoSub').textContent='';
+    $('videoStatus').innerHTML='<span class="spinner"></span> 解析链接并下载视频中…（较大视频可能要等一会）';
+    try {
+      const resp = await fetch('/api/videolink?url='+encodeURIComponent(url));
+      const ct = resp.headers.get('content-type')||'';
+      if(!resp.ok || ct.includes('application/json')){ let msg='解析失败'; try{ const j=await resp.json(); msg=j.error||msg; }catch(e){} throw new Error(msg); }
+      const blob = await resp.blob();
+      if(!blob || !blob.size) throw new Error('下载到的视频为空');
+      const file = new File([blob], 'video.mp4', {type: blob.type||'video/mp4'});
+      await handleVideo(file);
+    } catch(e){
+      $('videoStatus').textContent='';
+      $('videoErr').textContent='链接处理失败：'+((e&&e.message)||e);
+      $('videoErr').classList.remove('hide');
+    }
+  }
 $('videoReset').addEventListener('click',()=>{
   $('videoResult').classList.add('hide'); $('videoDrop').classList.remove('hide'); $('videoInput').value='';
   const v=$('videoPlayer'); try{v.pause();}catch(e){} v.removeAttribute('src'); v.load();
