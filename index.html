@@ -681,9 +681,16 @@ function baseName(n){ return (n||'file').replace(/\.[^.]+$/,''); }
     }
     onStatus('加载识别模型（首次需下载，请稍候）…');
     if (!transcriber) {
-      transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny', {
-        progress_callback: (p) => { if (p && p.status === 'progress') onStatus('下载识别模型 ' + Math.round(p.progress || 0) + '%（仅首次）'); }
-      });
+      let _lastErr;
+      for (let _try = 0; _try < 3 && !transcriber; _try++) {
+        try {
+          if (_try > 0) onStatus('模型加载失败，正在重试（第 ' + (_try + 1) + ' 次）…');
+          transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny', {
+            progress_callback: (p) => { if (p && p.status === 'progress') onStatus('下载识别模型 ' + Math.round(p.progress || 0) + '%（仅首次）'); }
+          });
+        } catch (err) { _lastErr = err; await new Promise(function(res){ setTimeout(res, 1500); }); }
+      }
+      if (!transcriber) throw new Error('识别模型加载失败（网络波动）：' + ((_lastErr && _lastErr.message) || _lastErr) + '。请点"解析并翻译"或"换一个视频"重试，或刷新页面后再试。');
     }
     onStatus('识别语音中…（视频越长越久，请耐心等待）');
     const result = await transcriber(audio, { return_timestamps: true, chunk_length_s: 30, stride_length_s: 5 });
