@@ -232,7 +232,7 @@
   <!-- ================= 视频模式 ================= -->
   <section id="mode-video" class="hide">
     <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
-      <input type="text" id="videoUrl" placeholder="粘贴 TikTok 或 Google Drive 视频链接…" style="flex:1;min-width:220px;border:1px solid var(--line);border-radius:12px;padding:11px 14px;font-size:14px;background:var(--panel);color:var(--ink);outline:none" />
+      <input type="text" id="videoUrl" placeholder="粘贴视频链接：TikTok / YouTube / Instagram / Google Drive…" style="flex:1;min-width:220px;border:1px solid var(--line);border-radius:12px;padding:11px 14px;font-size:14px;background:var(--panel);color:var(--ink);outline:none" />
       <button class="btn" id="videoUrlBtn">解析并翻译</button>
     </div>
     <div class="drop" id="videoDrop">
@@ -334,7 +334,7 @@ document.querySelectorAll('.tab').forEach(tab=>{
     tab.classList.add('active');
     state.mode = tab.dataset.mode;
     ['text','doc','table','image','currency','video'].forEach(m=>$('mode-'+m).classList.toggle('hide', m!==state.mode));
-    const hints={text:'适合复制粘贴文案、句子、段落',doc:'上传 Word / PDF / TXT',table:'上传 Excel / CSV',image:'上传截图或图片',currency:'实时货币换算',video:'上传视频，本地识别语音并翻译'};
+    const hints={text:'适合复制粘贴文案、句子、段落',doc:'上传 Word / PDF / TXT',table:'上传 Excel / CSV',image:'上传截图或图片',currency:'实时货币换算',video:'上传视频或粘贴链接，本地识别语音并翻译'};
     $('modeHint').textContent = hints[state.mode]||'';
     // 汇率模式不需要语言选择栏
     document.querySelector('.langbar').classList.toggle('hide', state.mode==='currency');
