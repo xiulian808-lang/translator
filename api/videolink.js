@@ -10,6 +10,17 @@ function json(obj, status) {
   });
 }
 
+function passthrough(upstream, referer) {
+  return new Response(upstream.body, {
+    status: 200,
+    headers: {
+      'content-type': upstream.headers.get('content-type') || 'video/mp4',
+      'access-control-allow-origin': '*',
+      'cache-control': 'no-store'
+    }
+  });
+}
+
 function driveId(url) {
   const m = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) || url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
   return m ? m[1] : null;
@@ -28,15 +39,60 @@ async function resolveTikTok(url) {
   return v;
 }
 
-function passthrough(upstream) {
-  return new Response(upstream.body, {
-    status: 200,
-    headers: {
-      'content-type': upstream.headers.get('content-type') || 'video/mp4',
-      'access-control-allow-origin': '*',
-      'cache-control': 'no-store'
+// 多平台解析（cobalt），用于 YouTube / Instagram / X 等。
+// 想要稳定，请在 Vercel 环境变量里设置 COBALT_API（你自己的/付费的 cobalt 实例地址），
+// 需要密钥时再设置 COBALT_KEY。
+async function resolveCobalt(url) {
+  const bases = [];
+  if (typeof process !== 'undefined' && process.env && process.env.COBALT_API) {
+    bases.push(process.env.COBALT_API.replace(/\/+$/, ''));
+  }
+  bases.push(
+    'https://cobalt-api.kwiatekmiki.com',
+    'https://cobalt-backend.canine.tools',
+    'https://capi.oak.li'
+  );
+  const headers = { 'content-type': 'application/json', 'accept': 'application/json' };
+  const key = (typeof process !== 'undefined' && process.env) ? process.env.COBALT_KEY : null;
+  if (key) headers['authorization'] = 'Api-Key ' + key;
+
+  let lastErr = '解析服务无响应';
+  for (const base of bases) {
+    try {
+      const ctrl = new AbortController();
+      const to = setTimeout(() => ctrl.abort(), 15000);
+      const r = await fetch(base, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ url, videoQuality: '480', filenameStyle: 'basic' }),
+        signal: ctrl.signal
+      });
+      clearTimeout(to);
+      const j = await r.json().catch(() => null);
+      if (j) {
+        if ((j.status === 'tunnel' || j.status === 'redirect' || j.status === 'stream') && j.url) return j.url;
+        if (j.status === 'picker' && Array.isArray(j.picker) && j.picker.length) {
+          const p = j.picker.find(x => x && x.url);
+          if (p) return p.url;
+        }
+        if (j.error) lastErr = (j.error.code || (typeof j.error === 'string' ? j.error : JSON.stringify(j.error)));
+        else if (j.text) lastErr = j.text;
+      } else {
+        lastErr = '解析服务返回异常 HTTP ' + r.status;
+      }
+    } catch (e) {
+      lastErr = (e && e.message) || String(e);
     }
-  });
+  }
+  throw new Error(lastErr);
+}
+
+async function streamFrom(videoUrl, referer) {
+  const h = { 'User-Agent': 'Mozilla/5.0' };
+  if (referer) h['Referer'] = referer;
+  const r = await fetch(videoUrl, { headers: h });
+  if (!r.ok) throw new Error('下载视频失败 HTTP ' + r.status);
+  return passthrough(r);
 }
 
 export default async function handler(req) {
@@ -48,9 +104,7 @@ export default async function handler(req) {
     // ---------- TikTok / 抖音 ----------
     if (/tiktok\.com|douyin\.|vm\.tiktok|vt\.tiktok/i.test(url)) {
       const v = await resolveTikTok(url);
-      const r = await fetch(v, { headers: { 'User-Agent': 'Mozilla/5.0', 'Referer': 'https://www.tikwm.com/' } });
-      if (!r.ok) return json({ error: '下载视频失败 HTTP ' + r.status }, 502);
-      return passthrough(r);
+      return await streamFrom(v, 'https://www.tikwm.com/');
     }
 
     // ---------- Google Drive ----------
@@ -75,15 +129,18 @@ export default async function handler(req) {
       return passthrough(r);
     }
 
-    // ---------- 暂不稳定支持 ----------
-    if (/instagram\.com/i.test(url)) {
-      return json({ error: 'Instagram 暂不稳定支持，建议先把视频下载下来再上传，或改用 Google Drive 链接' }, 422);
-    }
-    if (/youtube\.com|youtu\.be/i.test(url)) {
-      return json({ error: 'YouTube 暂不支持，建议先把视频下载下来再上传' }, 422);
+    // ---------- YouTube / Instagram / X 等（多平台解析）----------
+    if (/youtube\.com|youtu\.be|instagram\.com|twitter\.com|x\.com|facebook\.com/i.test(url)) {
+      try {
+        const v = await resolveCobalt(url);
+        return await streamFrom(v);
+      } catch (e) {
+        const plat = /instagram\.com/i.test(url) ? 'Instagram' : (/youtube\.com|youtu\.be/i.test(url) ? 'YouTube' : '该平台');
+        return json({ error: plat + ' 解析失败：' + ((e && e.message) || e) + '。可先下载视频再上传，或在 Vercel 配置 COBALT_API 使用稳定的解析服务。' }, 422);
+      }
     }
 
-    return json({ error: '暂不支持该链接，目前支持 TikTok 和 Google Drive' }, 422);
+    return json({ error: '暂不支持该链接，目前支持 TikTok、Google Drive、YouTube、Instagram' }, 422);
   } catch (e) {
     return json({ error: (e && e.message) || String(e) }, 500);
   }
