@@ -251,6 +251,7 @@
         <video id="videoPlayer" controls playsinline></video>
         <div class="vidsub" id="videoSub"></div>
       </div>
+      <div id="videoCaption" style="margin-top:10px;min-height:34px;padding:12px 16px;border-radius:12px;background:var(--brand-soft);color:var(--ink);font-size:19px;font-weight:600;line-height:1.5;text-align:center"></div>
       <div class="hint" id="videoStatus" style="margin-top:10px"></div>
       <div id="videoSegs" style="margin-top:10px;max-height:340px;overflow:auto;border-radius:12px;border:1px solid var(--line)"></div>
     </div>
@@ -636,7 +637,7 @@ async function handleVideo(file){
     if(!segs || !segs.length){ $('videoStatus').textContent='没有识别到可翻译的语音内容。'; return; }
     $('videoStatus').textContent='完成 · 共 '+segs.length+' 段，播放时会自动显示字幕。点下面任意一句可跳到对应画面。';
     renderVideoSegs(segs); $('videoExport').classList.remove('hide');
-    v.ontimeupdate=()=>{ const t=v.currentTime; let cur=''; for(const s of segs){ if(t>=s.start && t<=s.end){ cur=s.dst; break; } } $('videoSub').textContent=cur; };
+    v.ontimeupdate=()=>{ const t=v.currentTime; let cur=''; for(const s of segs){ if(t>=s.start && t<=s.end){ cur=s.dst; break; } } $('videoSub').textContent=cur; var _vc=document.getElementById('videoCaption'); if(_vc){ _vc.textContent=cur||''; } };
   }catch(e){ $('videoStatus').textContent=''; $('videoErr').textContent='视频处理失败：'+((e&&e.message)||e); $('videoErr').classList.remove('hide'); }
 }
 function renderVideoSegs(segs){
